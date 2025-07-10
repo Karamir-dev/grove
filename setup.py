@@ -1,4 +1,5 @@
 from setuptools import setup, find_packages
+import glob
 import os
 
 # Lecture de la version depuis grove/__version__.py
@@ -27,5 +28,8 @@ setup(
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License", 
         "Operating System :: OS Independent",
+    ],
+    data_files=[
+        ("etc/grove", glob.glob("etc/*"))
     ],
 )
