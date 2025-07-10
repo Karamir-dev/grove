@@ -2,6 +2,8 @@
 
 import pytest
 from grove.project import resolve_template
+from grove.project.jinja import find_template
+from json.decoder import JSONDecodeError
 
 
 @pytest.fixture
@@ -105,4 +107,91 @@ class Test_lorsque_je_veux_appliquer_un_template_jinja_et_que_seul_default_exist
         ''')
         with pytest.raises(ValueError, match="La variable 'prefix' est définie dans _var mais jamais utilisée."):
             resolve_template("unused_var", context={}, template_root=template_dir, strict=True)
+
+def test_find_template_raises_file_not_found(tmp_path):
+    # Aucun template n'existe
+    with pytest.raises(FileNotFoundError):
+        find_template("inexistant", tmp_path)
+
+def test_resolve_template_multiple_root_keys(tmp_path):
+    tpl_dir = tmp_path / "default"
+    tpl_dir.mkdir()
+    tpl = tpl_dir / "multi_root.j2"
+    # Template JSON avec plusieurs clés racines
+    tpl.write_text('{"root1": {}, "root2": {}}', encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc:
+        resolve_template("multi_root", {}, template_root=tmp_path)
+    assert "une seule clé racine" in str(exc.value)
+
+def test_resolve_template_strict_var_not_used(tmp_path):
+    tpl_dir = tmp_path / "default"
+    tpl_dir.mkdir()
+    tpl = tpl_dir / "not_used.j2"
+    tpl.write_text(
+        '''
+        {
+            "root": {
+                "_var": { "unused": "valeur" }
+            }
+        }
+        ''',
+        encoding="utf-8"
+    )
+    with pytest.raises(ValueError) as exc:
+        resolve_template("not_used", {}, template_root=tmp_path, strict=True)
+    assert "jamais utilisée" in str(exc.value)
+
+def test_resolve_template_strict_malformed_json(tmp_path):
+    tpl_dir = tmp_path / "default"
+    tpl_dir.mkdir()
+    tpl = tpl_dir / "malformed.j2"
+    # Source non JSON, l'except doit s'activer, pas de ValueError attendue
+    tpl.write_text("{{ foo }}", encoding="utf-8")
+    # Ce test ne doit pas lever d'exception car le bloc except est atteint
+    with pytest.raises(JSONDecodeError):
+        res = resolve_template("malformed", {"foo": "bar"}, template_root=tmp_path, strict=True)
+        assert isinstance(res, dict)
+
+def test_resolve_template_var_merge_and_cleanup(tmp_path):
+    tpl_dir = tmp_path / "default"
+    tpl_dir.mkdir()
+    tpl = tpl_dir / "merge.j2"
+    # _var fusionne, puis supprimé dans le résultat
+    tpl.write_text(
+        '''
+        {
+            "root": {
+                "_var": { "foo": "bar" },
+                "result": "{{ foo }}"
+            }
+        }
+        ''',
+        encoding="utf-8"
+    )
+    res = resolve_template("merge", {}, template_root=tmp_path)
+    # Le résultat doit avoir fusionné foo dans context et supprimé _var
+    assert "root" in res
+    assert "result" in res["root"]
+    assert res["root"]["result"] == "bar"
+    assert "_var" not in res["root"]
+
+def test_resolve_template_without_var_block(tmp_path):
+    tpl_dir = tmp_path / "default"
+    tpl_dir.mkdir()
+    tpl = tpl_dir / "no_var.j2"
+    # Pas de bloc _var, simple JSON avec une seule clé racine
+    tpl.write_text(
+        '''
+        {
+            "root": {
+                "result": "ok"
+            }
+        }
+        ''',
+        encoding="utf-8"
+    )
+    res = resolve_template("no_var", {}, template_root=tmp_path)
+    assert "root" in res
+    assert res["root"]["result"] == "ok"
 
